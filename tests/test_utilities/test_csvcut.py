@@ -1,8 +1,9 @@
 import sys
 from unittest.mock import patch
 
+from csvkit.exceptions import RequiredHeaderError
 from csvkit.utilities.csvcut import CSVCut, launch_new_instance
-from tests.utils import ColumnsTests, CSVKitTestCase, EmptyFileTests, NamesTests
+from tests.utils import ColumnsTests, CSVKitTestCase, EmptyFileTests, NamesTests, stdin_as_string
 
 
 class TestCSVCut(CSVKitTestCase, ColumnsTests, EmptyFileTests, NamesTests):
@@ -106,3 +107,14 @@ class TestCSVCut(CSVKitTestCase, ColumnsTests, EmptyFileTests, NamesTests):
     def test_null_byte(self):
         # Test that csvcut doesn't error on a null byte.
         self.get_output(['-C', '', 'examples/null_byte.csv'])
+
+    # --required-headers contract tests. The business facts live in tests/approved/; these two
+    # cover interface contracts that are not business facts: R5 and R8 of docs/specs/required-headers.md.
+
+    def test_required_headers_with_no_header_row(self):
+        with self.assertRaises(RequiredHeaderError):
+            self.Utility(['-c', '1', '-H', '--required-headers', 'a', 'examples/dummy.csv']).run()
+
+    def test_required_headers_ignores_empty_file(self):
+        with open('examples/empty.csv', 'rb') as f, stdin_as_string(f):
+            self.Utility(['-c', '1', '--required-headers', 'nope']).run()

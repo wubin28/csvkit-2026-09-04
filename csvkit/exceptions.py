@@ -41,3 +41,12 @@ class RequiredHeaderError(CustomException):
     Exception raised when an operation requires a CSV file to have a header row.
     """
     pass
+
+
+class MissingRequiredHeadersError(CustomException):
+    """
+    Exception raised when the header row omits columns declared with --required-headers.
+    """
+
+    def __init__(self, missing):
+        super().__init__('Missing required header(s): %s' % ', '.join(missing))

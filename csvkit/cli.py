@@ -19,7 +19,7 @@ from os.path import splitext
 import agate
 from agate.data_types.base import DEFAULT_NULL_VALUES
 
-from csvkit.exceptions import ColumnIdentifierError, RequiredHeaderError
+from csvkit.exceptions import ColumnIdentifierError, MissingRequiredHeadersError, RequiredHeaderError
 
 try:
     import zstandard
@@ -103,6 +103,10 @@ class CSVKitUtility:
         self.writer_kwargs = self._extract_csv_writer_kwargs()
 
         self._install_exception_handler()
+
+        # R5: --required-headers matches names in the header row, so it is meaningless without one.
+        if getattr(self.args, 'required_headers', None) and getattr(self.args, 'no_header_row', None):
+            raise RequiredHeaderError('You cannot use --required-headers with --no-header-row.')
 
         # Ensure SIGPIPE doesn't throw an exception
         # Prevents [Errno 32] Broken pipe errors, e.g. when piping to 'head'
@@ -234,6 +238,11 @@ class CSVKitUtility:
             self.argparser.add_argument(
                 '-H', '--no-header-row', dest='no_header_row', action='store_true',
                 help='Specify that the input CSV file has no header row. Will create default headers (a,b,c,...).')
+            self.argparser.add_argument(
+                '--required-headers', dest='required_headers', default=None,
+                help='Specify a comma-separated list of column names that must appear in the header row. Matching '
+                     'is exact and case-sensitive. Only csvcut and csvgrep enforce this option; the other utilities '
+                     'accept it without effect.')
         if 'K' not in self.override_flags:
             self.argparser.add_argument(
                 '-K', '--skip-lines', dest='skip_lines', type=int, default=0,
@@ -403,6 +412,26 @@ class CSVKitUtility:
 
         return self.input_file
 
+    def check_required_headers(self, column_names):
+        """
+        Raises if the header row omits any column declared with --required-headers.
+
+        Matching is exact and case-sensitive, after stripping whitespace from both sides. Missing
+        columns are reported all at once, in the order they were declared.
+        """
+        required_headers = getattr(self.args, 'required_headers', None)
+
+        # An empty header row means an empty file: leave its existing behavior untouched.
+        if not required_headers or not column_names:
+            return
+
+        present = {column_name.strip() for column_name in column_names}
+        declared = (raw.strip() for raw in required_headers.split(','))
+        missing = [name for name in declared if name and name not in present]
+
+        if missing:
+            raise MissingRequiredHeadersError(missing)
+
     def get_rows_and_column_names_and_column_ids(self, **kwargs):
         rows = agate.csv.reader(self.skip_lines(), **kwargs)
 
@@ -418,6 +447,7 @@ class CSVKitUtility:
             column_names = make_default_headers(len(row))
         else:
             column_names = next_row
+            self.check_required_headers(column_names)
 
         column_offset = self.get_column_offset()
         if kwargs.get('line_numbers'):
